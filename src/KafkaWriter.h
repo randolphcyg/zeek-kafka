@@ -24,17 +24,17 @@
 
 #include <zeek/Desc.h>
 #include <zeek/logging/WriterBackend.h>
-#include <zeek/threading/formatters/JSON.h>
 #include <zeek/threading/Formatter.h>
+#include <zeek/threading/formatters/JSON.h>
 
-#include "kafka.bif.h"
 #include "TaggedJSON.h"
+#include "kafka.bif.h"
 
 namespace RdKafka {
-    class Conf;
-    class Producer;
-    class Topic;
-}
+class Conf;
+class Producer;
+class Topic;
+} // namespace RdKafka
 
 namespace zeek::logging::writer {
 
@@ -44,42 +44,52 @@ namespace zeek::logging::writer {
 class KafkaWriter : public WriterBackend {
 
 public:
-    explicit KafkaWriter(WriterFrontend* frontend);
-    ~KafkaWriter();
+  explicit KafkaWriter(WriterFrontend *frontend);
+  ~KafkaWriter();
 
-    static WriterBackend* Instantiate(WriterFrontend* frontend)
-    {
-        return new KafkaWriter(frontend);
-    }
+  static WriterBackend *Instantiate(WriterFrontend *frontend) {
+    return new KafkaWriter(frontend);
+  }
 
 protected:
-    virtual bool DoInit(const WriterBackend::WriterInfo& info, int num_fields, const threading::Field* const* fields);
-    virtual bool DoWrite(int num_fields, const threading::Field* const* fields, threading::Value** vals);
-    virtual bool DoSetBuf(bool enabled);
-    virtual bool DoRotate(const char* rotated_path, double open, double close, bool terminating);
-    virtual bool DoFlush(double network_time);
-    virtual bool DoFinish(double network_time);
-    virtual bool DoHeartbeat(double network_time, double current_time);
+  virtual bool DoInit(const WriterBackend::WriterInfo &info, int num_fields,
+                      const threading::Field *const *fields);
+  virtual bool DoWrite(int num_fields, const threading::Field *const *fields,
+                       threading::Value **vals);
+  virtual bool DoSetBuf(bool enabled);
+  virtual bool DoRotate(const char *rotated_path, double open, double close,
+                        bool terminating);
+  virtual bool DoFlush(double network_time);
+  virtual bool DoFinish(double network_time);
+  virtual bool DoHeartbeat(double network_time, double current_time);
 
 private:
-    std::string GetConfigValue(const WriterInfo& info, const std::string name) const;
-    void raise_topic_resolved_event(const std::string topic);
-    static const std::string default_topic_key;
-    std::string stream_id;
-    bool tag_json;
-    bool mocking;
-    std::string json_timestamps;
-    std::map<std::string, std::string> kafka_conf;
-    std::map<std::string, std::string> additional_message_values;
-    std::string topic_name;
-    std::string topic_name_override;
-    threading::Formatter *formatter;
-    RdKafka::Producer* producer;
-    RdKafka::Topic* topic;
-    RdKafka::Conf* conf;
-    RdKafka::Conf* topic_conf;
+  std::mutex producer_mutex;
+  std::mutex config_mutex;
+  std::string GetConfigValue(const WriterInfo &info,
+                             const std::string name) const;
+  void raise_topic_resolved_event(const std::string topic);
+  static const std::string default_topic_key;
+  std::string stream_id;
+  bool tag_json;
+  bool mocking;
+  std::string json_timestamps;
+  std::map<std::string, std::string> kafka_conf;
+  std::map<std::string, std::string> additional_message_values;
+  std::string topic_name;
+  std::string topic_name_override;
+  std::string key_name;          // 存储 key 配置
+  std::string key_name_override; // 用于存储 key 配置的覆盖值
+  std::map<std::string, std::string> headers; // 存储 Headers 配置
+  RdKafka::Headers *
+  CreateHeaders(); // 辅助方法 将 Headers 配置转换为 RdKafka::Headers 对象
+  threading::Formatter *formatter;
+  RdKafka::Producer *producer;
+  RdKafka::Topic *topic;
+  RdKafka::Conf *conf;
+  RdKafka::Conf *topic_conf;
 };
 
-}
+} // namespace zeek::logging::writer
 
 #endif

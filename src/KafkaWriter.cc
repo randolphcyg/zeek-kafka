@@ -23,15 +23,16 @@ using namespace zeek::logging;
 using namespace writer;
 
 namespace {
-  // Place elements from zeek::TableVal t in to std::map m
-  void ToStdMap(std::map<std::string, std::string>& m, zeek::TableVal *t) {
-    for (const auto &iter : t->ToMap() ) {
-      std::string key = iter.first->AsListVal()->Idx(0)->AsString()->CheckString();
-      std::string value = iter.second->AsString()->CheckString();
-      m.insert(m.begin(), std::pair<std::string, std::string>(key, value));
-    }
+// Place elements from zeek::TableVal t in to std::map m
+void ToStdMap(std::map<std::string, std::string> &m, zeek::TableVal *t) {
+  for (const auto &iter : t->ToMap()) {
+    std::string key =
+        iter.first->AsListVal()->Idx(0)->AsString()->CheckString();
+    std::string value = iter.second->AsString()->CheckString();
+    m.insert(m.begin(), std::pair<std::string, std::string>(key, value));
   }
 }
+} // namespace
 
 // The Constructor is called once for each log filter that uses this log writer.
 KafkaWriter::KafkaWriter(WriterFrontend *frontend)
@@ -57,7 +58,14 @@ KafkaWriter::KafkaWriter(WriterFrontend *frontend)
 
   // kafka_conf and additional messages - thread local copy
   ToStdMap(kafka_conf, BifConst::Kafka::kafka_conf->AsTableVal());
-  ToStdMap(additional_message_values, BifConst::Kafka::additional_message_values->AsTableVal());
+  ToStdMap(additional_message_values,
+           BifConst::Kafka::additional_message_values->AsTableVal());
+
+  // key name - thread local copy
+  key_name.assign((const char *)BifConst::Kafka::key_name->Bytes(),
+                  BifConst::Kafka::key_name->Len());
+  // headers - thread local copy
+  ToStdMap(headers, BifConst::Kafka::headers->AsTableVal());
 }
 
 KafkaWriter::~KafkaWriter() {
@@ -65,13 +73,38 @@ KafkaWriter::~KafkaWriter() {
 }
 
 std::string KafkaWriter::GetConfigValue(const WriterInfo &info,
-                                   const std::string name) const {
+                                        const std::string name) const {
   std::map<const char *, const char *>::const_iterator it =
       info.config.find(name.c_str());
   if (it == info.config.end())
     return std::string();
   else
     return it->second;
+}
+
+RdKafka::Headers *KafkaWriter::CreateHeaders() {
+  RdKafka::Headers *kafkaHeaders = RdKafka::Headers::create();
+  if (!kafkaHeaders) {
+    Error("Failed to create Kafka headers");
+    return nullptr;
+  }
+
+  // 如果 headers 为空，不进行添加操作，直接返回创建好的对象
+  if (headers.empty()) {
+    return kafkaHeaders;
+  }
+
+  for (const auto &header : headers) {
+    RdKafka::ErrorCode err = kafkaHeaders->add(header.first, header.second);
+    if (err != RdKafka::ERR_NO_ERROR) {
+      Error(Fmt("Failed to add header '%s': %s", header.first.c_str(),
+                RdKafka::err2str(err).c_str()));
+      delete kafkaHeaders;
+      return nullptr;
+    }
+  }
+
+  return kafkaHeaders;
 }
 
 /**
@@ -99,6 +132,15 @@ bool KafkaWriter::DoInit(const WriterInfo &info, int num_fields,
 
   if (mocking) {
     raise_topic_resolved_event(topic_name);
+  }
+
+  // key初始化
+  key_name_override = GetConfigValue(info, "key_name");
+
+  if (!key_name_override.empty()) {
+    key_name = key_name_override;
+  } else if (key_name.empty()) {
+    key_name = "";
   }
 
   /**
@@ -231,6 +273,7 @@ bool KafkaWriter::DoFinish(double network_time) {
  */
 bool KafkaWriter::DoWrite(int num_fields, const threading::Field *const *fields,
                           threading::Value **vals) {
+  std::lock_guard<std::mutex> lock(producer_mutex);
   if (!mocking) {
     ODesc buff;
     buff.Clear();
@@ -243,19 +286,45 @@ bool KafkaWriter::DoWrite(int num_fields, const threading::Field *const *fields,
       formatter->Describe(&buff, num_fields, fields, vals);
     }
 
-    // send the formatted log entry to kafka
+    // 获取格式化后的日志数据
     const char *raw = (const char *)buff.Bytes();
-    RdKafka::ErrorCode resp = producer->produce(
-        topic, RdKafka::Topic::PARTITION_UA, RdKafka::Producer::RK_MSG_COPY,
-        const_cast<char *>(raw), strlen(raw), NULL, NULL);
+    size_t payload_len = strlen(raw);
+
+    // 准备消息的键
+    const std::string *key_ptr = &key_name;
+    const void *key_data = key_ptr->data();
+    size_t key_len = key_ptr->size();
+
+    // 创建 RdKafka::Headers 对象
+    RdKafka::Headers *kafkaHeaders = CreateHeaders();
+    if (!kafkaHeaders) {
+      return false;
+    }
+
+    // 调用支持 headers 的 produce 方法发送消息
+    RdKafka::ErrorCode resp =
+        producer->produce(topic_name,                     // 主题名称
+                          RdKafka::Topic::PARTITION_UA,   // 分区
+                          RdKafka::Producer::RK_MSG_COPY, // 消息标志
+                          const_cast<char *>(raw),        // 消息负载
+                          payload_len,                    // 负载长度
+                          key_data,                       // 消息键数据
+                          key_len,                        // 键长度
+                          0, // 时间戳，这里设为 0 表示使用默认时间戳
+                          kafkaHeaders, // 消息头
+                          nullptr       // 消息不透明指针
+        );
 
     if (RdKafka::ERR_NO_ERROR == resp) {
       producer->poll(0);
     } else {
+      // 释放 Headers 资源
+      delete kafkaHeaders;
       std::string err = RdKafka::err2str(resp);
       Error(Fmt("Kafka send failed: %s", err.c_str()));
     }
   }
+
   return true;
 }
 
