@@ -27,15 +27,6 @@ TaggedJSON::~TaggedJSON()
 
 bool TaggedJSON::Describe(ODesc* desc, int num_fields, const Field* const* fields, Value** vals, std::map<std::string,std::string> &const_vals) const
 {
-    desc->AddRaw("{");
-
-    // 'tag' the json; aka prepend the stream name to the json-formatted log content
-    desc->AddRaw("\"");
-    desc->AddRaw(stream_name);
-    desc->AddRaw("\": ");
-
-
-
     // append the JSON formatted log record itself
     JSON::Describe(desc, num_fields, fields, vals);
     if (const_vals.size() > 0) {
@@ -53,7 +44,6 @@ bool TaggedJSON::Describe(ODesc* desc, int num_fields, const Field* const* field
       }
     }
 
-  desc->AddRaw("}");
     return true;
 }
 

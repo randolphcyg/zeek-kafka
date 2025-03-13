@@ -164,6 +164,7 @@ bool KafkaWriter::DoInit(const WriterInfo &info, int num_fields,
 
   // initialize the formatter
   if (BifConst::Kafka::tag_json) {
+    stream_name = info.path;
     formatter = new threading::formatter::TaggedJSON(info.path, this, tf);
   } else {
     formatter = new threading::formatter::JSON(this, tf);
@@ -300,6 +301,9 @@ bool KafkaWriter::DoWrite(int num_fields, const threading::Field *const *fields,
     if (!kafkaHeaders) {
       return false;
     }
+
+    // 将 stream_name 添加到 Kafka 消息头
+    kafkaHeaders->add("log_type", stream_name);
 
     // 调用支持 headers 的 produce 方法发送消息
     RdKafka::ErrorCode resp =

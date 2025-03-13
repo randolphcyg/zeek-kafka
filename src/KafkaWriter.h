@@ -80,6 +80,7 @@ private:
   std::string topic_name_override;
   std::string key_name;          // 存储 key 配置
   std::string key_name_override; // 用于存储 key 配置的覆盖值
+  std::string stream_name;       // 存储 日志类型 配置
   std::map<std::string, std::string> headers; // 存储 Headers 配置
   RdKafka::Headers *
   CreateHeaders(); // 辅助方法 将 Headers 配置转换为 RdKafka::Headers 对象
