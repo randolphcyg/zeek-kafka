@@ -162,9 +162,11 @@ bool KafkaWriter::DoInit(const WriterInfo &info, int num_fields,
     return false;
   }
 
+  // log type
+  stream_name = info.path;
+
   // initialize the formatter
   if (BifConst::Kafka::tag_json) {
-    stream_name = info.path;
     formatter = new threading::formatter::TaggedJSON(info.path, this, tf);
   } else {
     formatter = new threading::formatter::JSON(this, tf);
